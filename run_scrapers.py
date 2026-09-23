@@ -6,6 +6,7 @@ from typing import List
 from database.db import init_db, save_rates
 from scrapers.base_scraper import BaseScraper
 from scrapers.dbs_scraper import DBSScraper
+from scrapers.uob_scraper import UOBBoardScraper, UOBScraper
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,11 +14,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("run_scrapers")
 
-# Add new banks here as their scrapers are written
 SCRAPERS: List[BaseScraper] = [
     DBSScraper(),
+    UOBBoardScraper(),
+    UOBScraper(),
 ]
-
 
 def main() -> int:
     init_db()
@@ -32,7 +33,7 @@ def main() -> int:
             failed.append(scraper.bank_name)
 
     succeeded = len(SCRAPERS) - len(failed)
-    logger.info("Saved %d rates from %d of %d banks", total_saved, succeeded, len(SCRAPERS))
+    logger.info("Saved %d rates from %d of %d scrapers", total_saved, succeeded, len(SCRAPERS))
     if failed:
         logger.warning("No rates collected from: %s", ", ".join(failed))
 

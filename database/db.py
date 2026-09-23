@@ -67,15 +67,16 @@ def get_latest_rates() -> List[dict]:
             SELECT r.*
             FROM rates r
             JOIN (
-                SELECT bank, product, tenure_months, min_deposit,
+                SELECT bank, product, tenure_months, min_deposit, is_promotional,
                        MAX(scraped_at) AS latest
                 FROM rates
-                GROUP BY bank, product, tenure_months, min_deposit
+                GROUP BY bank, product, tenure_months, min_deposit, is_promotional
             ) l
               ON r.bank = l.bank
              AND r.product = l.product
              AND r.tenure_months IS l.tenure_months
              AND r.min_deposit IS l.min_deposit
+             AND r.is_promotional = l.is_promotional
              AND r.scraped_at = l.latest
             ORDER BY r.rate_percent DESC
         """).fetchall()
