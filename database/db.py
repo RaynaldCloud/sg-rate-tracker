@@ -26,18 +26,20 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS rates (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                bank          TEXT    NOT NULL,
-                product       TEXT    NOT NULL,
-                rate_percent  REAL    NOT NULL,
-                tenure_months INTEGER,
-                min_deposit   REAL,
-                scraped_at    TEXT    NOT NULL
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                bank           TEXT    NOT NULL,
+                product        TEXT    NOT NULL,
+                rate_percent   REAL    NOT NULL,
+                tenure_months  INTEGER,
+                min_deposit    REAL,
+                max_deposit    REAL,
+                is_promotional INTEGER NOT NULL DEFAULT 0,
+                scraped_at     TEXT    NOT NULL
             )
         """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_rates_lookup
-            ON rates (bank, product, tenure_months, scraped_at)
+            ON rates (bank, product, tenure_months, min_deposit, scraped_at)
         """)
 
 
@@ -46,11 +48,12 @@ def save_rates(rates: List[Rate]) -> int:
     with get_connection() as conn:
         conn.executemany(
             """INSERT INTO rates
-               (bank, product, rate_percent, tenure_months, min_deposit, scraped_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (bank, product, rate_percent, tenure_months, min_deposit,
+                max_deposit, is_promotional, scraped_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                (r.bank, r.product, r.rate_percent, r.tenure_months,
-                 r.min_deposit, r.scraped_at.isoformat())
+                (r.bank, r.product, r.rate_percent, r.tenure_months, r.min_deposit,
+                 r.max_deposit, int(r.is_promotional), r.scraped_at.isoformat())
                 for r in rates
             ],
         )
@@ -58,19 +61,21 @@ def save_rates(rates: List[Rate]) -> int:
 
 
 def get_latest_rates() -> List[dict]:
-    """Return the most recent rate for each bank, product and tenure."""
+    """Return the most recent rate for each bank, product, tenure and deposit tier."""
     with get_connection() as conn:
         rows = conn.execute("""
             SELECT r.*
             FROM rates r
             JOIN (
-                SELECT bank, product, tenure_months, MAX(scraped_at) AS latest
+                SELECT bank, product, tenure_months, min_deposit,
+                       MAX(scraped_at) AS latest
                 FROM rates
-                GROUP BY bank, product, tenure_months
+                GROUP BY bank, product, tenure_months, min_deposit
             ) l
               ON r.bank = l.bank
              AND r.product = l.product
              AND r.tenure_months IS l.tenure_months
+             AND r.min_deposit IS l.min_deposit
              AND r.scraped_at = l.latest
             ORDER BY r.rate_percent DESC
         """).fetchall()
@@ -78,13 +83,15 @@ def get_latest_rates() -> List[dict]:
 
 
 def get_rate_history(bank: str, product: str,
-                     tenure_months: Optional[int] = None) -> List[dict]:
-    """Return every recorded rate for one product, oldest first."""
+                     tenure_months: Optional[int] = None,
+                     min_deposit: Optional[float] = None) -> List[dict]:
+    """Return every recorded rate for one product and tier, oldest first."""
     with get_connection() as conn:
         rows = conn.execute(
             """SELECT * FROM rates
-               WHERE bank = ? AND product = ? AND tenure_months IS ?
+               WHERE bank = ? AND product = ?
+                 AND tenure_months IS ? AND min_deposit IS ?
                ORDER BY scraped_at""",
-            (bank, product, tenure_months),
+            (bank, product, tenure_months, min_deposit),
         ).fetchall()
     return [dict(row) for row in rows]

@@ -32,9 +32,10 @@ def create_app() -> Flask:
         if not bank or not product:
             return jsonify(error="'bank' and 'product' query parameters are required"), 400
         tenure = request.args.get("tenure_months", type=int)
-        history = get_rate_history(bank, product, tenure)
+        min_deposit = request.args.get("min_deposit", type=float)
+        history = get_rate_history(bank, product, tenure, min_deposit)
         return jsonify(bank=bank, product=product, tenure_months=tenure,
-                       count=len(history), history=history)
+                       min_deposit=min_deposit, count=len(history), history=history)
 
     @app.errorhandler(404)
     def not_found(error):
