@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SG Rate Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --text:#1f2933; --muted:#6b7280;
+            --accent:#0f766e; --promo:#b45309; --border:#e5e7eb; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           background:var(--bg); color:var(--text); }
+    main { max-width:960px; margin:0 auto; padding:32px 20px; }
+    h1 { margin:0 0 4px; font-size:1.6rem; }
+    h2 { margin:0 0 12px; font-size:1.1rem; }
+    .subtitle { color:var(--muted); margin:0 0 24px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:10px;
+            padding:20px; margin-bottom:20px; }
+    .controls { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; }
+    label { display:flex; flex-direction:column; font-size:.85rem; color:var(--muted); gap:4px; }
+    input, select { font-size:1rem; padding:8px 10px; border:1px solid var(--border); border-radius:6px; }
+    .checkbox { flex-direction:row; align-items:center; gap:8px; color:var(--text); }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--border); }
+    th { font-size:.75rem; text-transform:uppercase; color:var(--muted); }
+    tbody tr { cursor:pointer; }
+    tbody tr:hover { background:#f0fdfa; }
+    tr.selected { background:#ccfbf1; }
+    .rate { font-weight:600; }
+    .best { color:var(--accent); }
+    .badge { font-size:.75rem; padding:2px 8px; border-radius:999px; background:#e5e7eb; }
+    .badge.promo { background:#fef3c7; color:var(--promo); }
+    .muted { color:var(--muted); font-size:.85rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>SG Rate Tracker</h1>
+  <p class="subtitle">Singapore fixed deposit rates, tracked over time.</p>
+
+  <section class="card controls">
+    <label>Deposit amount (S$)
+      <input id="amount" type="number" min="0" step="1000" value="20000">
+    </label>
+    <label>Tenure
+      <select id="tenure"></select>
+    </label>
+    <label class="checkbox">
+      <input id="promos" type="checkbox" checked> Include promotions
+    </label>
+  </section>
+
+  <section class="card">
+    <h2>Rates for your deposit</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Bank</th><th>Type</th><th>Deposit tier</th><th>Rate (p.a.)</th></tr></thead>
+        <tbody id="rates-body"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="muted" hidden>No rates match this deposit amount and tenure.</p>
+    <p class="muted">Promotional rates are time-limited and usually require fresh funds.</p>
+  </section>
+
+  <section class="card">
+    <h2>Rate history</h2>
+    <p id="history-hint" class="muted">Click a row above to see how that rate has changed.</p>
+    <canvas id="history-chart" height="120"></canvas>
+  </section>
+</main>
+
+<script>
+  let allRates = [];
+  let chart = null;
+
+  const money = n => "S$" + Number(n).toLocaleString("en-SG");
+
+  function tierLabel(r) {
+    if (r.min_deposit == null && r.max_deposit == null) return "Any amount";
+    if (r.min_deposit == null) return "Up to " + money(r.max_deposit);
+    if (r.max_deposit == null) return "From " + money(r.min_deposit);
+    return money(r.min_deposit) + " – " + money(r.max_deposit);
+  }
+
+  function fitsAmount(r, amount) {
+    if (r.min_deposit != null && amount < r.min_deposit) return false;
+    if (r.max_deposit != null && amount > r.max_deposit) return false;
+    return true;
+  }
+
+  async function loadRates() {
+    const res = await fetch("/api/rates");
+    const data = await res.json();
+    allRates = data.rates;
+
+    // Fill the tenure dropdown with every tenure we have data for
+    const tenures = [...new Set(allRates.map(r => r.tenure_months).filter(t => t != null))]
+      .sort((a, b) => a - b);
+    const select = document.getElementById("tenure");
+    select.innerHTML = tenures
+      .map(t => `<option value="${t}">${t} month${t > 1 ? "s" : ""}</option>`).join("");
+    if (tenures.includes(12)) select.value = "12";
+    render();
+  }
+
+  function render() {
+    const amount = Number(document.getElementById("amount").value) || 0;
+    const tenure = Number(document.getElementById("tenure").value);
+    const includePromos = document.getElementById("promos").checked;
+
+    const matches = allRates
+      .filter(r => r.tenure_months === tenure)
+      .filter(r => includePromos || !r.is_promotional)
+      .filter(r => fitsAmount(r, amount))
+      .sort((a, b) => b.rate_percent - a.rate_percent);
+
+    const body = document.getElementById("rates-body");
+    body.innerHTML = "";
+    document.getElementById("empty").hidden = matches.length > 0;
+
+    matches.forEach((r, i) => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${r.bank}</td>
+        <td><span class="badge ${r.is_promotional ? "promo" : ""}">${r.is_promotional ? "Promo" : "Board"}</span></td>
+        <td>${tierLabel(r)}</td>
+        <td class="rate ${i === 0 ? "best" : ""}">${r.rate_percent.toFixed(2)}%</td>`;
+      row.addEventListener("click", () => {
+        document.querySelectorAll("tr.selected").forEach(el => el.classList.remove("selected"));
+        row.classList.add("selected");
+        loadHistory(r);
+      });
+      body.appendChild(row);
+    });
+  }
+
+  async function loadHistory(r) {
+    const params = new URLSearchParams({
+      bank: r.bank, product: r.product, tenure_months: r.tenure_months,
+    });
+    if (r.min_deposit != null) params.set("min_deposit", r.min_deposit);
+
+    const res = await fetch("/api/rates/history?" + params);
+    const data = await res.json();
+    const points = data.history.filter(h => h.is_promotional === r.is_promotional);
+
+    document.getElementById("history-hint").textContent =
+      `${r.bank} ${r.is_promotional ? "promotional" : "board"} rate · ` +
+      `${r.tenure_months} months · ${tierLabel(r)}`;
+
+    if (chart) chart.destroy();
+    chart = new Chart(document.getElementById("history-chart"), {
+      type: "line",
+      data: {
+        labels: points.map(h => new Date(h.scraped_at)
+          .toLocaleString("en-SG", { dateStyle: "medium", timeStyle: "short" })),
+        datasets: [{ data: points.map(h => h.rate_percent), borderColor: "#0f766e", tension: 0.2 }],
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: "% p.a." } } },
+      },
+    });
+  }
+
+  ["amount", "tenure", "promos"].forEach(id =>
+    document.getElementById(id).addEventListener("input", render));
+  loadRates();
+</script>
+</body>
+</html>

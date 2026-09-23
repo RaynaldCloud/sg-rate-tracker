@@ -1,5 +1,5 @@
 """Flask REST API for serving scraped interest rates."""
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 
 from database.db import get_latest_rates, get_rate_history, init_db
 
@@ -8,6 +8,10 @@ def create_app() -> Flask:
     """Build and configure the Flask app."""
     app = Flask(__name__)
     init_db()
+
+    @app.get("/")
+    def dashboard():
+        return render_template("index.html")
 
     @app.get("/api/health")
     def health():
